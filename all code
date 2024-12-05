@@ -120,7 +120,6 @@
     dest: /etc/nginx/nginx.conf
   become: yes
 
-#nginx.conf.j2 for configuretion rev-proxy
 - name: Enable and start nginx service
   ansible.builtin.systemd:
     name: nginx
@@ -128,6 +127,7 @@
     enabled: yes
   become: yes
 
+#nginx.conf.j2 for configuretion rev-proxy
 user nginx;
 worker_processes auto;
 error_log /var/log/nginx/error.log;
