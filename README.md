@@ -1,3 +1,10 @@
+1. You need add ansible folder in / direcory
+2. Then write these command:
+   ~ cd /ansible/roles
+   ~ ansible-galaxy collection install ansible.posix
+   ~ ansible-galaxy collection install community.docker
+   ~ ansible-playbook -i inventory.ini playbook.yml
+
 References that were used:
 1.	https://serverastra.com/docs/Tutorials/Set-Up-and-Secure-SSH-on-CentOS%2C-Rocky%2C-and-AlmaLinux-7%2C-8%2C-and-9
 2.	https://stackoverflow.com/questions/62405671/ansible-playbook-to-check-the-condition-of-selinux-status
