@@ -1,0 +1,169 @@
+--- playbook.yml
+- name: Configure OS settings
+  hosts: c9.local
+  roles:
+    - os-configure
+    - install-netdata
+    - netdata-nginx-proxy
+
+--- tasks
+# tasks file for os-configure
+
+- name: Disable SELinux
+  ansible.posix.selinux:
+    state: disabled
+
+- name: Disable Firewalld
+  ansible.posix.firewalld:
+    state: disabled
+    permanent: true
+
+- name: Install chrony package
+  yum:
+    name: chrony
+    state: latest
+    update_cache: yes
+
+- name: Deploy chrony.conf template
+  template:
+    src: /ansible/roles/os-configure/templates/chrony.conf.j2
+    dest: /etc/chrony.conf
+    owner: root
+    group: root
+    mode: 0644
+    backup: yes
+
+- name: Restart chronyd
+  service:
+    name: chronyd
+    state: restarted
+
+- name: Add Docker CE repository
+  ansible.builtin.command:
+    cmd: dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+
+- name: Install docker packages
+  yum:
+    name: 
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    state: latest
+    update_cache: yes
+
+- name: Start and enabled docker service
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: yes
+
+# tasks file for install-netdata
+
+- name: Pull an image netdata/netdata:stable
+  community.docker.docker_image_pull:
+    name: netdata/netdata:stable
+
+- name: Create a volume netdatacache
+  community.docker.docker_volume:
+    name: netdatacache
+    state: present
+
+- name: Create a volume netdataconfig
+  community.docker.docker_volume:
+    name: netdataconfig
+    state: present
+
+- name: Create a volume netdatalib
+  community.docker.docker_volume:
+    name: netdatalib
+    state: present
+
+- name: Create a data container netdata
+  community.docker.docker_container:
+    image: netdata/netdata:stable
+    name: netdata
+    network_mode: host
+    pid_mode: host
+    restart_policy: unless-stopped
+    capabilities:
+      - sys_admin
+      - sys_ptrace
+    volumes:
+      - netdataconfig:/etc/netdata
+      - netdatalib:/var/lib/netdata
+      - netdatacache:/var/cache/netdata
+      - /:/host/root:ro,rslave
+      - /etc/passwd:/host/etc/passwd:ro
+      - /etc/group:/host/etc/group:ro
+      - /etc/localtime:/etc/localtime:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /etc/os-release:/host/etc/os-release:ro
+      - /var/log:/host/var/log:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "19999:19999"
+
+# tasks file for netdata-nginx-proxy
+
+- name: Install nginx package
+  ansible.builtin.yum:
+    name: nginx
+    state: present
+  become: yes
+
+- name: Configure nginx as reverse proxy for NetData
+  ansible.builtin.template:
+    src: nginx.conf.j2
+    dest: /etc/nginx/nginx.conf
+  become: yes
+
+#nginx.conf.j2 for configuretion rev-proxy
+- name: Enable and start nginx service
+  ansible.builtin.systemd:
+    name: nginx
+    state: started
+    enabled: yes
+  become: yes
+
+user nginx;
+worker_processes auto;
+error_log /var/log/nginx/error.log;
+pid /var/run/nginx.pid;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                      '$status $body_bytes_sent "$http_referer" '
+                      '"$http_user_agent" "$http_x_forwarded_for"';
+
+    access_log /var/log/nginx/access.log main;
+
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65;
+    types_hash_max_size 2048;
+
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+
+    server {
+        listen 80;
+
+        location / {
+            proxy_pass http://127.0.0.1:19999;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+    }
+}
+
+
